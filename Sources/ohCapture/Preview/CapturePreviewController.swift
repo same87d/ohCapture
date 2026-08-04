@@ -16,6 +16,7 @@ final class CapturePreviewController {
     private weak var textButton: NSButton?
     private weak var mosaicButton: NSButton?
     private weak var ocrButton: NSButton?
+    private weak var translateButton: NSButton?
     private var isPresentingTextDialog = false
     private var keyMonitor: Any?
     private var onCopy: (() -> Void)?
@@ -99,7 +100,7 @@ final class CapturePreviewController {
 
     private func makeToolbar() -> NSPanel {
         let buttonWidth: CGFloat = 70
-        let toolbarSize = CGSize(width: buttonWidth * 9 + 20, height: 48)
+        let toolbarSize = CGSize(width: buttonWidth * 10 + 20, height: 48)
         let panel = makePanel(
             frame: CGRect(origin: .zero, size: toolbarSize),
             level: NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
@@ -137,6 +138,9 @@ final class CapturePreviewController {
         let ocr = makeButton(title: "OCR", symbol: "text.viewfinder", action: #selector(recognizeText))
         ocrButton = ocr
         stack.addArrangedSubview(ocr)
+        let translate = makeButton(title: "Translate", symbol: "character.book.closed", action: #selector(translateText))
+        translateButton = translate
+        stack.addArrangedSubview(translate)
         stack.addArrangedSubview(makeButton(title: "Undo", symbol: "arrow.uturn.backward", action: #selector(undo)))
         stack.addArrangedSubview(makeButton(title: "Copy", symbol: "doc.on.doc", action: #selector(copyAndClose)))
         stack.addArrangedSubview(makeButton(title: "Save", symbol: "square.and.arrow.down", action: #selector(saveAndClose)))
@@ -235,6 +239,52 @@ final class CapturePreviewController {
                 alert.runModal()
             }
         }
+    }
+
+    @objc private func translateText() {
+        guard translateButton?.isEnabled != false else { return }
+        guard #available(macOS 26.0, *) else {
+            showWarning(
+                title: "Translation requires macOS 26",
+                message: "OCR remains available on earlier macOS versions."
+            )
+            return
+        }
+
+        translateButton?.isEnabled = false
+        translateButton?.title = "Translating…"
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let sourceText = try await ocrService.recognizeText(in: image)
+                let translatedText = try await TranslationService().translate(sourceText)
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(translatedText, forType: .string)
+                translateButton?.title = "Copied"
+                translateButton?.image = NSImage(
+                    systemSymbolName: "checkmark",
+                    accessibilityDescription: "Translation copied"
+                )
+                translateButton?.isEnabled = true
+            } catch {
+                translateButton?.title = "Translate"
+                translateButton?.isEnabled = true
+                showWarning(
+                    title: "Translation failed",
+                    message: "\(error.localizedDescription)\n\nInstall the required languages in System Settings → General → Language & Region → Translation Languages, then try again."
+                )
+            }
+        }
+    }
+
+    private func showWarning(title: String, message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = message
+        alert.runModal()
     }
 
     private func setActiveTool(_ tool: AnnotationTool) {

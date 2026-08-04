@@ -7,9 +7,9 @@ ohCapture is a lightweight, open-source screenshot utility for macOS. It is desi
 - Global shortcut and rectangular selection
 - Automatic window snapping
 - Non-disruptive capture of obscured windows with ScreenCaptureKit
-- Arrow, rectangle, text, numbered marker, and mosaic annotations
+- Arrow, rectangle, text, and mosaic annotations
 - Local OCR with Vision
-- Screenshot translation
+- Local screenshot translation on macOS 26 and later
 
 ## Requirements
 
@@ -40,6 +40,8 @@ Press `Enter` to copy, `Command + S` to save, or `Escape` to close the preview.
 Choose **Arrow** or **Rect** to draw red shapes. Choose **Text**, click the image, and enter a label. Choose **Mosaic** and drag over sensitive content to pixelate it. Use **Undo** or `Command + Z` to remove the most recent annotation. Copied and saved images include annotations at the original screenshot resolution.
 
 Choose **OCR** to recognize text locally with Apple's Vision framework and copy the result directly to the clipboard. The screenshot is not uploaded.
+
+Choose **Translate** on macOS 26 or later to OCR and translate locally. Chinese is translated to English; other detected languages are translated to Simplified Chinese. Install the relevant languages in System Settings first. The translated text is copied to the clipboard.
 
 Press `Escape` to cancel the capture overlay. The **Capture Window…** menu item remains available as a diagnostic window picker.
 
