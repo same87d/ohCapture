@@ -7,6 +7,7 @@ private final class KeyablePanel: NSPanel {
 final class CapturePreviewController {
     private let image: CGImage
     private let captureFrame: CGRect
+    private let ocrService = OCRService()
     private var previewWindow: NSPanel?
     private var toolbarWindow: NSPanel?
     private var canvasView: AnnotationCanvasView?
@@ -14,6 +15,7 @@ final class CapturePreviewController {
     private weak var rectangleButton: NSButton?
     private weak var textButton: NSButton?
     private weak var mosaicButton: NSButton?
+    private weak var ocrButton: NSButton?
     private var isPresentingTextDialog = false
     private var keyMonitor: Any?
     private var onCopy: (() -> Void)?
@@ -97,7 +99,7 @@ final class CapturePreviewController {
 
     private func makeToolbar() -> NSPanel {
         let buttonWidth: CGFloat = 70
-        let toolbarSize = CGSize(width: buttonWidth * 8 + 20, height: 48)
+        let toolbarSize = CGSize(width: buttonWidth * 9 + 20, height: 48)
         let panel = makePanel(
             frame: CGRect(origin: .zero, size: toolbarSize),
             level: NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
@@ -132,6 +134,9 @@ final class CapturePreviewController {
         mosaic.setButtonType(.toggle)
         mosaicButton = mosaic
         stack.addArrangedSubview(mosaic)
+        let ocr = makeButton(title: "OCR", symbol: "text.viewfinder", action: #selector(recognizeText))
+        ocrButton = ocr
+        stack.addArrangedSubview(ocr)
         stack.addArrangedSubview(makeButton(title: "Undo", symbol: "arrow.uturn.backward", action: #selector(undo)))
         stack.addArrangedSubview(makeButton(title: "Copy", symbol: "doc.on.doc", action: #selector(copyAndClose)))
         stack.addArrangedSubview(makeButton(title: "Save", symbol: "square.and.arrow.down", action: #selector(saveAndClose)))
@@ -200,6 +205,36 @@ final class CapturePreviewController {
 
     @objc private func undo() {
         canvasView?.undo()
+    }
+
+    @objc private func recognizeText() {
+        guard ocrButton?.isEnabled != false else { return }
+        ocrButton?.isEnabled = false
+        ocrButton?.title = "Reading…"
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let text = try await ocrService.recognizeText(in: image)
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(text, forType: .string)
+                ocrButton?.title = "Copied"
+                ocrButton?.image = NSImage(
+                    systemSymbolName: "checkmark",
+                    accessibilityDescription: "OCR text copied"
+                )
+                ocrButton?.isEnabled = true
+            } catch {
+                ocrButton?.title = "OCR"
+                ocrButton?.isEnabled = true
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = "Text recognition failed"
+                alert.informativeText = error.localizedDescription
+                alert.runModal()
+            }
+        }
     }
 
     private func setActiveTool(_ tool: AnnotationTool) {

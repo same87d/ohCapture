@@ -39,6 +39,8 @@ The first capture asks for Screen Recording permission in System Settings.
 Press `Enter` to copy, `Command + S` to save, or `Escape` to close the preview.
 Choose **Arrow** or **Rect** to draw red shapes. Choose **Text**, click the image, and enter a label. Choose **Mosaic** and drag over sensitive content to pixelate it. Use **Undo** or `Command + Z` to remove the most recent annotation. Copied and saved images include annotations at the original screenshot resolution.
 
+Choose **OCR** to recognize text locally with Apple's Vision framework and copy the result directly to the clipboard. The screenshot is not uploaded.
+
 Press `Escape` to cancel the capture overlay. The **Capture Window…** menu item remains available as a diagnostic window picker.
 
 ## Install
