@@ -1,9 +1,12 @@
 import AppKit
+import Carbon
 import UniformTypeIdentifiers
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let captureService = WindowCaptureService()
+    private var globalHotKey: GlobalHotKey?
+    private var overlayController: CaptureOverlayController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -13,25 +16,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let menu = NSMenu()
-        menu.addItem(
+        let captureItem = menu.addItem(
             withTitle: "Capture Window…",
             action: #selector(chooseWindow),
             keyEquivalent: ""
         )
+        captureItem.target = self
+
+        let interactiveItem = menu.addItem(
+            withTitle: "Interactive Capture    ⌥⇧2",
+            action: #selector(startInteractiveCaptureFromMenu),
+            keyEquivalent: ""
+        )
+        interactiveItem.target = self
         menu.addItem(.separator())
-        menu.addItem(
+        let quitItem = menu.addItem(
             withTitle: "Quit ohCapture",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
+        quitItem.target = NSApp
         item.menu = menu
         statusItem = item
+
+        globalHotKey = GlobalHotKey(keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(optionKey | shiftKey)) { [weak self] in
+            self?.startInteractiveCapture()
+        }
     }
 
     @objc private func chooseWindow() {
         Task { @MainActor in
             do {
-                let windows = try await captureService.availableWindows()
+                let windows = try await captureService.availableWindows().sorted {
+                    $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+                }
                 guard !windows.isEmpty else {
                     showError("No capturable windows were found.")
                     return
@@ -57,6 +75,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 showError(error.localizedDescription)
             }
         }
+    }
+
+    private func startInteractiveCapture() {
+        guard overlayController == nil else { return }
+
+        Task { @MainActor in
+            do {
+                let windows = try await captureService.availableWindows()
+                guard !windows.isEmpty else {
+                    showError("No capturable windows were found.")
+                    return
+                }
+
+                let controller = CaptureOverlayController(windows: windows)
+                overlayController = controller
+                controller.begin { [weak self] selection in
+                    guard let self else { return }
+                    self.overlayController = nil
+                    guard let selection else { return }
+
+                    Task { @MainActor in
+                        do {
+                            let image = try await self.captureService.capture(selection)
+                            try self.save(image, suggestedName: selection.safeFilename)
+                        } catch {
+                            self.showError(error.localizedDescription)
+                        }
+                    }
+                }
+            } catch WindowCaptureError.permissionRequired {
+                showPermissionHelp()
+            } catch {
+                showError(error.localizedDescription)
+            }
+        }
+    }
+
+    @objc private func startInteractiveCaptureFromMenu() {
+        startInteractiveCapture()
     }
 
     @MainActor

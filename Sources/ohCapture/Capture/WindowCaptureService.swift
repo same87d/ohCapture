@@ -43,6 +43,16 @@ struct CapturableWindow: Identifiable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return cleaned.isEmpty ? "ohCapture" : String(cleaned.prefix(100))
     }
+
+    var appKitFrame: CGRect {
+        let desktopTop = NSScreen.screens.map(\.frame.maxY).max() ?? 0
+        return CGRect(
+            x: window.frame.minX,
+            y: desktopTop - window.frame.maxY,
+            width: window.frame.width,
+            height: window.frame.height
+        )
+    }
 }
 
 final class WindowCaptureService {
@@ -68,7 +78,6 @@ final class WindowCaptureService {
                 return window.owningApplication?.bundleIdentifier != ownBundleIdentifier
             }
             .map(CapturableWindow.init)
-            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
     func capture(_ candidate: CapturableWindow) async throws -> CGImage {
