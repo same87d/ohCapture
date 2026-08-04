@@ -45,6 +45,8 @@ final class AnnotationCanvasView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func mouseDown(with event: NSEvent) {
         guard activeTool != .none else { return }
         let point = clamped(event.locationInWindow)
@@ -120,6 +122,10 @@ final class AnnotationCanvasView: NSView {
         bitmap.size = bounds.size
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = graphicsContext
+        graphicsContext.cgContext.scaleBy(
+            x: CGFloat(sourceImage.width) / bounds.width,
+            y: CGFloat(sourceImage.height) / bounds.height
+        )
         draw(bounds)
         graphicsContext.flushGraphics()
         NSGraphicsContext.restoreGraphicsState()

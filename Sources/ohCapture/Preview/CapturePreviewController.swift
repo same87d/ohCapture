@@ -8,7 +8,6 @@ private final class KeyablePanel: NSPanel {
 final class CapturePreviewController {
     private let image: CGImage
     private let captureFrame: CGRect
-    private let ocrService = OCRService()
     private var previewWindow: NSPanel?
     private var toolbarWindow: NSPanel?
     private var canvasView: AnnotationCanvasView?
@@ -16,8 +15,6 @@ final class CapturePreviewController {
     private weak var rectangleButton: NSButton?
     private weak var textButton: NSButton?
     private weak var mosaicButton: NSButton?
-    private weak var ocrButton: NSButton?
-    private weak var translateButton: NSButton?
     private var isPresentingTextDialog = false
     private var keyMonitor: Any?
     private var onCopy: (() -> Void)?
@@ -46,10 +43,16 @@ final class CapturePreviewController {
             visibleFrame: visibleFrame
         )
         let preview = makePanel(frame: previewFrame, level: .floating)
+        preview.hasShadow = false
         let canvas = AnnotationCanvasView(
             image: image,
             frame: NSRect(origin: .zero, size: previewFrame.size)
         )
+        canvas.wantsLayer = true
+        canvas.layer?.borderWidth = 2
+        canvas.layer?.borderColor = NSColor.systemBlue.cgColor
+        canvas.layer?.cornerRadius = 4
+        canvas.layer?.masksToBounds = true
         preview.contentView = canvas
         canvas.onTextRequested = { [weak self] point in
             self?.requestText(at: point)
@@ -120,7 +123,7 @@ final class CapturePreviewController {
 
     private func makeToolbar() -> NSPanel {
         let buttonWidth: CGFloat = 70
-        let toolbarSize = CGSize(width: buttonWidth * 10 + 20, height: 48)
+        let toolbarSize = CGSize(width: buttonWidth * 8 + 20, height: 48)
         let panel = makePanel(
             frame: CGRect(origin: .zero, size: toolbarSize),
             level: NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
@@ -139,28 +142,34 @@ final class CapturePreviewController {
         stack.alignment = .centerY
         stack.distribution = .fillEqually
         stack.spacing = 4
-        let arrow = makeButton(title: "Arrow", symbol: "arrow.up.right", action: #selector(selectArrow))
-        arrow.setButtonType(.toggle)
+        let arrow = makeAnnotationToolButton(
+            title: "Arrow",
+            symbol: "arrow.up.right",
+            action: #selector(selectArrow)
+        )
         arrowButton = arrow
         stack.addArrangedSubview(arrow)
-        let rectangle = makeButton(title: "Rect", symbol: "rectangle", action: #selector(selectRectangle))
-        rectangle.setButtonType(.toggle)
+        let rectangle = makeAnnotationToolButton(
+            title: "Rect",
+            symbol: "rectangle",
+            action: #selector(selectRectangle)
+        )
         rectangleButton = rectangle
         stack.addArrangedSubview(rectangle)
-        let text = makeButton(title: "Text", symbol: "textformat", action: #selector(selectText))
-        text.setButtonType(.toggle)
-        textButton = text
-        stack.addArrangedSubview(text)
-        let mosaic = makeButton(title: "Mosaic", symbol: "square.grid.3x3", action: #selector(selectMosaic))
-        mosaic.setButtonType(.toggle)
+        let mosaic = makeAnnotationToolButton(
+            title: "Mosaic",
+            symbol: "square.grid.3x3",
+            action: #selector(selectMosaic)
+        )
         mosaicButton = mosaic
         stack.addArrangedSubview(mosaic)
-        let ocr = makeButton(title: "OCR", symbol: "text.viewfinder", action: #selector(recognizeText))
-        ocrButton = ocr
-        stack.addArrangedSubview(ocr)
-        let translate = makeButton(title: "Translate", symbol: "character.book.closed", action: #selector(translateText))
-        translateButton = translate
-        stack.addArrangedSubview(translate)
+        let text = makeAnnotationToolButton(
+            title: "Text",
+            symbol: "textformat",
+            action: #selector(selectText)
+        )
+        textButton = text
+        stack.addArrangedSubview(text)
         stack.addArrangedSubview(makeButton(title: "Undo", symbol: "arrow.uturn.backward", action: #selector(undo)))
         stack.addArrangedSubview(makeButton(title: "Copy", symbol: "doc.on.doc", action: #selector(copyAndClose)))
         stack.addArrangedSubview(makeButton(title: "Save", symbol: "square.and.arrow.down", action: #selector(saveAndClose)))
@@ -175,6 +184,19 @@ final class CapturePreviewController {
         button.bezelStyle = .recessed
         button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
         button.imagePosition = .imageLeading
+        return button
+    }
+
+    private func makeAnnotationToolButton(
+        title: String,
+        symbol: String,
+        action: Selector
+    ) -> NSButton {
+        let button = makeButton(title: title, symbol: symbol, action: action)
+        button.setButtonType(.toggle)
+        button.sendAction(on: .leftMouseDown)
+        button.wantsLayer = true
+        button.layer?.cornerRadius = 6
         return button
     }
 
@@ -226,88 +248,24 @@ final class CapturePreviewController {
         canvasView?.undo()
     }
 
-    @objc private func recognizeText() {
-        guard ocrButton?.isEnabled != false else { return }
-        ocrButton?.isEnabled = false
-        ocrButton?.title = "Reading…"
-
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let text = try await ocrService.recognizeText(in: image)
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(text, forType: .string)
-                ocrButton?.title = "Copied"
-                ocrButton?.image = NSImage(
-                    systemSymbolName: "checkmark",
-                    accessibilityDescription: "OCR text copied"
-                )
-                ocrButton?.isEnabled = true
-            } catch {
-                ocrButton?.title = "OCR"
-                ocrButton?.isEnabled = true
-                let alert = NSAlert()
-                alert.alertStyle = .warning
-                alert.messageText = "Text recognition failed"
-                alert.informativeText = error.localizedDescription
-                alert.runModal()
-            }
-        }
-    }
-
-    @objc private func translateText() {
-        guard translateButton?.isEnabled != false else { return }
-        guard #available(macOS 26.0, *) else {
-            showWarning(
-                title: "Translation requires macOS 26",
-                message: "OCR remains available on earlier macOS versions."
-            )
-            return
-        }
-
-        translateButton?.isEnabled = false
-        translateButton?.title = "Translating…"
-
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let sourceText = try await ocrService.recognizeText(in: image)
-                let translatedText = try await TranslationService().translate(sourceText)
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(translatedText, forType: .string)
-                translateButton?.title = "Copied"
-                translateButton?.image = NSImage(
-                    systemSymbolName: "checkmark",
-                    accessibilityDescription: "Translation copied"
-                )
-                translateButton?.isEnabled = true
-            } catch {
-                translateButton?.title = "Translate"
-                translateButton?.isEnabled = true
-                showWarning(
-                    title: "Translation failed",
-                    message: "\(error.localizedDescription)\n\nInstall the required languages in System Settings → General → Language & Region → Translation Languages, then try again."
-                )
-            }
-        }
-    }
-
-    private func showWarning(title: String, message: String) {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = title
-        alert.informativeText = message
-        alert.runModal()
-    }
-
     private func setActiveTool(_ tool: AnnotationTool) {
         canvasView?.activeTool = tool
-        arrowButton?.state = tool == .arrow ? .on : .off
-        rectangleButton?.state = tool == .rectangle ? .on : .off
-        textButton?.state = tool == .text ? .on : .off
-        mosaicButton?.state = tool == .mosaic ? .on : .off
+        updateToolButton(arrowButton, isSelected: tool == .arrow)
+        updateToolButton(rectangleButton, isSelected: tool == .rectangle)
+        updateToolButton(textButton, isSelected: tool == .text)
+        updateToolButton(mosaicButton, isSelected: tool == .mosaic)
+        if let previewWindow, let canvasView {
+            previewWindow.makeKey()
+            previewWindow.makeFirstResponder(canvasView)
+        }
+    }
+
+    private func updateToolButton(_ button: NSButton?, isSelected: Bool) {
+        button?.state = isSelected ? .on : .off
+        button?.contentTintColor = isSelected ? .white : .labelColor
+        button?.layer?.backgroundColor = isSelected
+            ? NSColor.controlAccentColor.cgColor
+            : NSColor.clear.cgColor
     }
 
     private func requestText(at point: CGPoint) {

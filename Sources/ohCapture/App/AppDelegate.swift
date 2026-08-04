@@ -2,12 +2,56 @@ import AppKit
 import Carbon
 import UniformTypeIdentifiers
 
+private final class MenuShortcutHintView: NSView {
+    private let onSelect: () -> Void
+
+    init(title: String, shortcutHint: String, onSelect: @escaping () -> Void) {
+        self.onSelect = onSelect
+        super.init(frame: NSRect(x: 0, y: 0, width: 310, height: 22))
+
+        let titleField = NSTextField(labelWithString: title)
+        titleField.font = NSFont.menuFont(ofSize: 0)
+        titleField.translatesAutoresizingMaskIntoConstraints = false
+
+        let shortcutField = NSTextField(labelWithString: shortcutHint)
+        shortcutField.font = NSFont.menuFont(ofSize: 0)
+        shortcutField.textColor = .secondaryLabelColor
+        shortcutField.alignment = .right
+        shortcutField.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(titleField)
+        addSubview(shortcutField)
+        NSLayoutConstraint.activate([
+            titleField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            titleField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            shortcutField.leadingAnchor.constraint(greaterThanOrEqualTo: titleField.trailingAnchor, constant: 16),
+            shortcutField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            shortcutField.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(point) else { return }
+        enclosingMenuItem?.menu?.cancelTracking()
+        onSelect()
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let captureService = WindowCaptureService()
-    private var globalHotKey: GlobalHotKey?
+    private var windowHotKey: GlobalHotKey?
+    private var portionHotKey: GlobalHotKey?
+    private var fastCaptureMonitor: Any?
     private var overlayController: CaptureOverlayController?
     private var previewController: CapturePreviewController?
+    private var isPreparingCapture = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -17,59 +61,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let menu = NSMenu()
-        let captureItem = menu.addItem(
-            withTitle: "Capture Window…",
-            action: #selector(chooseWindow),
+        let fastCaptureItem = menu.addItem(
+            withTitle: "Fast Capture",
+            action: nil,
             keyEquivalent: ""
         )
-        captureItem.target = self
+        fastCaptureItem.view = MenuShortcutHintView(
+            title: "Fast Capture",
+            shortcutHint: "⇧⌥ + Left Click"
+        ) { [weak self] in
+            self?.startAuthorizedCapture(mode: .region)
+        }
 
-        let interactiveItem = menu.addItem(
-            withTitle: "Interactive Capture    ⌥⇧2",
-            action: #selector(startInteractiveCaptureFromMenu),
-            keyEquivalent: ""
+        let windowItem = menu.addItem(
+            withTitle: "Capture Selected Window",
+            action: #selector(startWindowCaptureFromMenu),
+            keyEquivalent: "1"
         )
-        interactiveItem.target = self
+        windowItem.keyEquivalentModifierMask = [.shift, .option]
+        windowItem.target = self
+
+        let portionItem = menu.addItem(
+            withTitle: "Capture Selected Portion",
+            action: #selector(startPortionCaptureFromMenu),
+            keyEquivalent: "2"
+        )
+        portionItem.keyEquivalentModifierMask = [.shift, .option]
+        portionItem.target = self
+
         menu.addItem(.separator())
         let quitItem = menu.addItem(
             withTitle: "Quit ohCapture",
             action: #selector(NSApplication.terminate(_:)),
-            keyEquivalent: "q"
+            keyEquivalent: ""
         )
+        quitItem.image = nil
         quitItem.target = NSApp
         item.menu = menu
         statusItem = item
 
-        globalHotKey = GlobalHotKey(keyCode: UInt32(kVK_ANSI_2), modifiers: UInt32(optionKey | shiftKey)) { [weak self] in
-            self?.startInteractiveCapture()
+        windowHotKey = GlobalHotKey(
+            keyCode: UInt32(kVK_ANSI_1),
+            modifiers: UInt32(optionKey | shiftKey),
+            identifier: 1
+        ) { [weak self] in
+            self?.startAuthorizedCapture(mode: .window)
+        }
+        portionHotKey = GlobalHotKey(
+            keyCode: UInt32(kVK_ANSI_2),
+            modifiers: UInt32(optionKey | shiftKey),
+            identifier: 2
+        ) { [weak self] in
+            self?.startAuthorizedCapture(mode: .region)
+        }
+        fastCaptureMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) {
+            [weak self] event in
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard modifiers.contains([.shift, .option]),
+                  !modifiers.contains([.command, .control]) else { return }
+            self?.startFastCapture(at: NSEvent.mouseLocation)
         }
     }
 
-    @objc private func chooseWindow() {
+    private func startAuthorizedCapture(mode: CaptureOverlayMode) {
+        guard overlayController == nil, !isPreparingCapture else { return }
+        isPreparingCapture = true
+
         Task { @MainActor in
+            defer { isPreparingCapture = false }
             do {
                 let windows = try await captureService.availableWindows(requestingDirectCaptureAccess: true).sorted {
                     $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
                 }
-                guard !windows.isEmpty else {
+                guard mode != .window || !windows.isEmpty else {
                     showError("No capturable windows were found.")
                     return
                 }
-
-                let picker = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 420, height: 28))
-                windows.forEach { picker.addItem(withTitle: $0.displayName) }
-
-                let alert = NSAlert()
-                alert.messageText = "Capture a window"
-                alert.informativeText = "The selected window is captured directly without moving it to the front."
-                alert.accessoryView = picker
-                alert.addButton(withTitle: "Capture")
-                alert.addButton(withTitle: "Cancel")
-
-                guard alert.runModal() == .alertFirstButtonReturn else { return }
-                let window = windows[picker.indexOfSelectedItem]
-                let image = try await captureService.capture(window)
-                try save(image, suggestedName: window.safeFilename)
+                beginOverlay(mode: mode, windows: windows)
             } catch WindowCaptureError.permissionRequired {
                 showPermissionHelp()
             } catch {
@@ -78,49 +146,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func startInteractiveCapture() {
-        guard overlayController == nil else { return }
+    private func startFastCapture(at initialMouseLocation: CGPoint) {
+        guard overlayController == nil, !isPreparingCapture else { return }
+        beginOverlay(mode: .region, windows: [], initialMouseLocation: initialMouseLocation)
+    }
 
-        Task { @MainActor in
-            do {
-                let windows = try await captureService.availableWindows(requestingDirectCaptureAccess: true)
-                guard !windows.isEmpty else {
-                    showError("No capturable windows were found.")
-                    return
-                }
+    private func beginOverlay(
+        mode: CaptureOverlayMode,
+        windows: [CapturableWindow],
+        initialMouseLocation: CGPoint? = nil
+    ) {
+        let controller = CaptureOverlayController(windows: windows)
+        overlayController = controller
+        controller.begin(mode: mode, startingAt: initialMouseLocation) { [weak self] selection in
+            guard let self else { return }
+            self.overlayController = nil
+            guard let selection else { return }
 
-                let controller = CaptureOverlayController(windows: windows)
-                overlayController = controller
-                controller.begin { [weak self] selection in
-                    guard let self else { return }
-                    self.overlayController = nil
-                    guard let selection else { return }
-
-                    Task { @MainActor in
-                        do {
-                            switch selection {
-                            case .window(let window):
-                                let image = try await self.captureService.capture(window)
-                                self.showPreview(image, frame: window.appKitFrame, suggestedName: window.safeFilename)
-                            case .region(let region, let screen):
-                                let image = try await self.captureService.captureRegion(region, on: screen)
-                                self.showPreview(image, frame: region, suggestedName: "ohCapture-region")
-                            }
-                        } catch {
-                            self.showError(error.localizedDescription)
-                        }
+            Task { @MainActor in
+                do {
+                    switch selection {
+                    case .window(let window):
+                        let image = try await self.captureService.capture(window)
+                        self.showPreview(
+                            image,
+                            frame: window.appKitFrame,
+                            suggestedName: window.safeFilename
+                        )
+                    case .region(let region, let screen):
+                        let image = try await self.captureService.captureRegion(region, on: screen)
+                        self.showPreview(image, frame: region, suggestedName: "ohCapture-region")
                     }
+                } catch WindowCaptureError.permissionRequired {
+                    self.showPermissionHelp()
+                } catch {
+                    self.showError(error.localizedDescription)
                 }
-            } catch WindowCaptureError.permissionRequired {
-                showPermissionHelp()
-            } catch {
-                showError(error.localizedDescription)
             }
         }
     }
 
-    @objc private func startInteractiveCaptureFromMenu() {
-        startInteractiveCapture()
+    @objc private func startWindowCaptureFromMenu() {
+        startAuthorizedCapture(mode: .window)
+    }
+
+    @objc private func startPortionCaptureFromMenu() {
+        startAuthorizedCapture(mode: .region)
     }
 
     @MainActor
@@ -174,5 +245,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.messageText = "ohCapture couldn’t capture the window"
         alert.informativeText = message
         alert.runModal()
+    }
+
+    deinit {
+        if let fastCaptureMonitor { NSEvent.removeMonitor(fastCaptureMonitor) }
     }
 }

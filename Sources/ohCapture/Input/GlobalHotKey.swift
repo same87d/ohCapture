@@ -4,9 +4,15 @@ final class GlobalHotKey {
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private let handler: () -> Void
-    private let identifier: UInt32 = 1
+    private let identifier: UInt32
 
-    init?(keyCode: UInt32, modifiers: UInt32, handler: @escaping () -> Void) {
+    init?(
+        keyCode: UInt32,
+        modifiers: UInt32,
+        identifier: UInt32,
+        handler: @escaping () -> Void
+    ) {
+        self.identifier = identifier
         self.handler = handler
 
         var eventType = EventTypeSpec(

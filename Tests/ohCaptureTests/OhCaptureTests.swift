@@ -72,4 +72,36 @@ final class OhCaptureTests: XCTestCase {
             CGRect(x: 100, y: 1000, width: 900, height: 700)
         )
     }
+
+    func testRenderedImageFillsTheOriginalPixelCanvas() throws {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: 80,
+            height: 40,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return XCTFail("Could not create source image context")
+        }
+        context.setFillColor(red: 0.9, green: 0.1, blue: 0.1, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 80, height: 40))
+        let source = try XCTUnwrap(context.makeImage())
+        let canvas = AnnotationCanvasView(
+            image: source,
+            frame: CGRect(x: 0, y: 0, width: 20, height: 10)
+        )
+        let rendered = try XCTUnwrap(canvas.renderedImage())
+
+        XCTAssertEqual(rendered.width, 80)
+        XCTAssertEqual(rendered.height, 40)
+        let providerData = try XCTUnwrap(rendered.dataProvider?.data)
+        let bytes = CFDataGetBytePtr(providerData)
+        let topRightOffset = (rendered.height - 1) * rendered.bytesPerRow + (rendered.width - 1) * 4
+        XCTAssertGreaterThan(bytes?[topRightOffset] ?? 0, 200)
+        XCTAssertLessThan(bytes?[topRightOffset + 1] ?? 255, 80)
+        XCTAssertEqual(bytes?[topRightOffset + 3], 255)
+    }
 }

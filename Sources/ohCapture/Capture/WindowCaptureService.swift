@@ -120,7 +120,7 @@ final class WindowCaptureService {
         configuration.width = max(1, Int(frame.width * scale))
         configuration.height = max(1, Int(frame.height * scale))
         configuration.showsCursor = false
-        configuration.ignoreShadowsSingleWindow = false
+        configuration.ignoreShadowsSingleWindow = true
 
         let filter = SCContentFilter(desktopIndependentWindow: candidate.window)
         return try await SCScreenshotManager.captureImage(
