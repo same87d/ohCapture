@@ -34,7 +34,9 @@ The first capture asks for Screen Recording permission in System Settings.
 3. Press `Option + Shift + 2`, or choose **Interactive Capture** from the menu-bar icon.
 4. Move the pointer over a window and click to capture its complete contents without raising it.
 5. Or drag a rectangle to capture a free-form region on the current display.
-6. Choose where to save the PNG.
+6. Use the floating toolbar to copy, save, or close the captured image.
+
+Press `Enter` to copy, `Command + S` to save, or `Escape` to close the preview.
 
 Press `Escape` to cancel the capture overlay. The **Capture Window…** menu item remains available as a diagnostic window picker.
 

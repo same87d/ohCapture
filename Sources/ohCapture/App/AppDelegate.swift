@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let captureService = WindowCaptureService()
     private var globalHotKey: GlobalHotKey?
     private var overlayController: CaptureOverlayController?
+    private var previewController: CapturePreviewController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -100,10 +101,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             switch selection {
                             case .window(let window):
                                 let image = try await self.captureService.capture(window)
-                                try self.save(image, suggestedName: window.safeFilename)
+                                self.showPreview(image, frame: window.appKitFrame, suggestedName: window.safeFilename)
                             case .region(let region, let screen):
                                 let image = try await self.captureService.captureRegion(region, on: screen)
-                                try self.save(image, suggestedName: "ohCapture-region")
+                                self.showPreview(image, frame: region, suggestedName: "ohCapture-region")
                             }
                         } catch {
                             self.showError(error.localizedDescription)
@@ -120,6 +121,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func startInteractiveCaptureFromMenu() {
         startInteractiveCapture()
+    }
+
+    @MainActor
+    private func showPreview(_ image: CGImage, frame: CGRect, suggestedName: String) {
+        previewController?.close()
+
+        let controller = CapturePreviewController(image: image, captureFrame: frame)
+        previewController = controller
+        controller.begin(
+            onCopy: { [weak self] in
+                self?.previewController = nil
+            },
+            onSave: { [weak self] image in
+                guard let self else { return }
+                self.previewController = nil
+                do {
+                    try self.save(image, suggestedName: suggestedName)
+                } catch {
+                    self.showError(error.localizedDescription)
+                }
+            },
+            onClose: { [weak self] in
+                self?.previewController = nil
+            }
+        )
     }
 
     @MainActor
