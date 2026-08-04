@@ -11,9 +11,12 @@ final class CaptureOverlayView: NSView {
     }
     private var trackingAreaReference: NSTrackingArea?
     private var dragStart: CGPoint?
+    private var pressedWindow: CapturableWindow?
     private var selectionRect: CGRect?
 
     override var acceptsFirstResponder: Bool { true }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -39,14 +42,15 @@ final class CaptureOverlayView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         dragStart = pointClampedToBounds(event.locationInWindow)
+        pressedWindow = hoveredWindow
         selectionRect = nil
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard let dragStart else { return }
         let current = pointClampedToBounds(event.locationInWindow)
-        let rect = normalizedRect(from: dragStart, to: current)
-        guard rect.width >= 3 || rect.height >= 3 else { return }
+        let rect = CaptureGeometry.normalizedRect(from: dragStart, to: current)
+        guard hypot(rect.width, rect.height) >= 3 else { return }
         hoveredWindow = nil
         selectionRect = rect
         needsDisplay = true
@@ -55,14 +59,18 @@ final class CaptureOverlayView: NSView {
     override func mouseUp(with event: NSEvent) {
         defer {
             dragStart = nil
+            pressedWindow = nil
             selectionRect = nil
         }
 
         if let selectionRect, selectionRect.width >= 4, selectionRect.height >= 4, let screen {
-            let globalRegion = selectionRect.offsetBy(dx: screenFrame.minX, dy: screenFrame.minY)
+            let globalRegion = CaptureGeometry.globalRegion(
+                localRegion: selectionRect,
+                screenFrame: screenFrame
+            )
             onSelection?(.region(globalRegion, screen))
-        } else if let hoveredWindow {
-            onSelection?(.window(hoveredWindow))
+        } else if let pressedWindow {
+            onSelection?(.window(pressedWindow))
         }
     }
 
@@ -110,15 +118,6 @@ final class CaptureOverlayView: NSView {
         CGPoint(
             x: min(max(point.x, bounds.minX), bounds.maxX),
             y: min(max(point.y, bounds.minY), bounds.maxY)
-        )
-    }
-
-    private func normalizedRect(from start: CGPoint, to end: CGPoint) -> CGRect {
-        CGRect(
-            x: min(start.x, end.x),
-            y: min(start.y, end.y),
-            width: abs(end.x - start.x),
-            height: abs(end.y - start.y)
         )
     }
 

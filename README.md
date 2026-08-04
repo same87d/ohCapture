@@ -50,6 +50,8 @@ sudo ./scripts/install.sh
 open /Applications/ohCapture.app
 ```
 
+脚本即使通过 `sudo` 启动，也会使用当前登录用户构建源码，只在复制应用时使用管理员权限，避免产生 root 所有的构建缓存。
+
 ## 首次运行与权限
 
 ohCapture 首次截图时需要“屏幕与系统音频录制”权限：

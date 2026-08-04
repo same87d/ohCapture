@@ -48,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func chooseWindow() {
         Task { @MainActor in
             do {
-                let windows = try await captureService.availableWindows().sorted {
+                let windows = try await captureService.availableWindows(requestingDirectCaptureAccess: true).sorted {
                     $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
                 }
                 guard !windows.isEmpty else {
@@ -83,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { @MainActor in
             do {
-                let windows = try await captureService.availableWindows()
+                let windows = try await captureService.availableWindows(requestingDirectCaptureAccess: true)
                 guard !windows.isEmpty else {
                     showError("No capturable windows were found.")
                     return

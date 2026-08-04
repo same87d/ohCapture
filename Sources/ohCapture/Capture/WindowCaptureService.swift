@@ -45,18 +45,16 @@ struct CapturableWindow: Identifiable {
     }
 
     var appKitFrame: CGRect {
-        let desktopTop = NSScreen.screens.map(\.frame.maxY).max() ?? 0
-        return CGRect(
-            x: window.frame.minX,
-            y: desktopTop - window.frame.maxY,
-            width: window.frame.width,
-            height: window.frame.height
+        let mainDisplayMaxY = NSScreen.screens.first?.frame.maxY ?? 0
+        return CaptureGeometry.appKitWindowFrame(
+            from: window.frame,
+            mainDisplayMaxY: mainDisplayMaxY
         )
     }
 }
 
 final class WindowCaptureService {
-    func availableWindows() async throws -> [CapturableWindow] {
+    func availableWindows(requestingDirectCaptureAccess: Bool = false) async throws -> [CapturableWindow] {
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
             throw WindowCaptureError.permissionRequired
         }
@@ -65,6 +63,9 @@ final class WindowCaptureService {
             true,
             onScreenWindowsOnly: true
         )
+        if requestingDirectCaptureAccess {
+            try await requestDirectCaptureAccess(using: content)
+        }
         let ownBundleIdentifier = Bundle.main.bundleIdentifier
 
         return content.windows
@@ -78,6 +79,34 @@ final class WindowCaptureService {
                 return window.owningApplication?.bundleIdentifier != ownBundleIdentifier
             }
             .map(CapturableWindow.init)
+    }
+
+    /// Completes macOS direct-capture authorization before the app displays
+    /// its own selection interface. The 1 x 1 result is immediately discarded.
+    private func requestDirectCaptureAccess(using content: SCShareableContent) async throws {
+        guard let display = content.displays.first else {
+            throw WindowCaptureError.invalidWindowSize
+        }
+
+        let ownBundleIdentifier = Bundle.main.bundleIdentifier
+        let excludedApplications = content.applications.filter {
+            $0.bundleIdentifier == ownBundleIdentifier
+        }
+        let filter = SCContentFilter(
+            display: display,
+            excludingApplications: excludedApplications,
+            exceptingWindows: []
+        )
+        let configuration = SCStreamConfiguration()
+        configuration.sourceRect = CGRect(x: 0, y: 0, width: 1, height: 1)
+        configuration.width = 1
+        configuration.height = 1
+        configuration.showsCursor = false
+
+        _ = try await SCScreenshotManager.captureImage(
+            contentFilter: filter,
+            configuration: configuration
+        )
     }
 
     func capture(_ candidate: CapturableWindow) async throws -> CGImage {

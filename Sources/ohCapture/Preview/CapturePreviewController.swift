@@ -2,6 +2,7 @@ import AppKit
 
 private final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
 }
 
 final class CapturePreviewController {
@@ -37,24 +38,40 @@ final class CapturePreviewController {
         self.onSave = onSave
         self.onClose = onClose
 
-        let preview = makePanel(frame: captureFrame, level: .screenSaver)
+        let screen = targetScreen()
+        let visibleFrame = screen?.visibleFrame ?? captureFrame
+        let toolbar = makeToolbar()
+        let previewFrame = PreviewLayout.fittedPreviewFrame(
+            captureFrame: captureFrame,
+            visibleFrame: visibleFrame
+        )
+        let preview = makePanel(frame: previewFrame, level: .floating)
         let canvas = AnnotationCanvasView(
             image: image,
-            frame: NSRect(origin: .zero, size: captureFrame.size)
+            frame: NSRect(origin: .zero, size: previewFrame.size)
         )
         preview.contentView = canvas
         canvas.onTextRequested = { [weak self] point in
             self?.requestText(at: point)
         }
-        preview.orderFrontRegardless()
         previewWindow = preview
         canvasView = canvas
 
-        let toolbar = makeToolbar()
-        toolbar.setFrameOrigin(toolbarOrigin(for: toolbar.frame.size))
-        NSApp.activate(ignoringOtherApps: true)
-        toolbar.makeKeyAndOrderFront(nil)
+        toolbar.setFrameOrigin(
+            PreviewLayout.toolbarOrigin(
+                previewFrame: previewFrame,
+                toolbarSize: toolbar.frame.size,
+                visibleFrame: visibleFrame
+            )
+        )
         toolbarWindow = toolbar
+
+        NSApp.activate(ignoringOtherApps: true)
+        preview.makeKeyAndOrderFront(nil)
+        preview.makeFirstResponder(canvas)
+        preview.addChildWindow(toolbar, ordered: .above)
+        toolbar.orderFrontRegardless()
+        preview.makeKey()
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
@@ -86,7 +103,7 @@ final class CapturePreviewController {
     private func makePanel(frame: CGRect, level: NSWindow.Level) -> NSPanel {
         let panel = KeyablePanel(
             contentRect: frame,
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
@@ -94,6 +111,9 @@ final class CapturePreviewController {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.acceptsMouseMovedEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         return panel
     }
@@ -103,7 +123,7 @@ final class CapturePreviewController {
         let toolbarSize = CGSize(width: buttonWidth * 10 + 20, height: 48)
         let panel = makePanel(
             frame: CGRect(origin: .zero, size: toolbarSize),
-            level: NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+            level: NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
         )
 
         let effect = NSVisualEffectView(frame: NSRect(origin: .zero, size: toolbarSize))
@@ -158,18 +178,13 @@ final class CapturePreviewController {
         return button
     }
 
-    private func toolbarOrigin(for size: CGSize) -> CGPoint {
-        let screen = NSScreen.screens.first(where: { $0.frame.intersects(captureFrame) }) ?? NSScreen.main
-        let available = screen?.visibleFrame ?? captureFrame
-        let desiredBelow = CGPoint(
-            x: min(max(captureFrame.maxX - size.width, available.minX), available.maxX - size.width),
-            y: captureFrame.minY - size.height - 8
-        )
-        if desiredBelow.y >= available.minY { return desiredBelow }
-        return CGPoint(
-            x: desiredBelow.x,
-            y: min(captureFrame.maxY + 8, available.maxY - size.height)
-        )
+    private func targetScreen() -> NSScreen? {
+        NSScreen.screens.max { left, right in
+            let leftIntersection = left.frame.intersection(captureFrame)
+            let rightIntersection = right.frame.intersection(captureFrame)
+            return leftIntersection.width * leftIntersection.height
+                < rightIntersection.width * rightIntersection.height
+        } ?? NSScreen.main
     }
 
     @objc private func copyAndClose() {
@@ -319,6 +334,9 @@ final class CapturePreviewController {
     }
 
     private func finish() {
+        if let previewWindow, let toolbarWindow {
+            previewWindow.removeChildWindow(toolbarWindow)
+        }
         previewWindow?.orderOut(nil)
         toolbarWindow?.orderOut(nil)
         previewWindow = nil

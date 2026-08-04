@@ -1,6 +1,11 @@
 import AppKit
 import Carbon
 
+private final class CaptureOverlayWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 enum CaptureSelection {
     case window(CapturableWindow)
     case region(CGRect, NSScreen)
@@ -19,8 +24,9 @@ final class CaptureOverlayController {
     func begin(completion: @escaping (CaptureSelection?) -> Void) {
         self.completion = completion
 
+        NSApp.activate(ignoringOtherApps: true)
         overlayWindows = NSScreen.screens.map { screen in
-            let overlay = NSWindow(
+            let overlay = CaptureOverlayWindow(
                 contentRect: screen.frame,
                 styleMask: .borderless,
                 backing: .buffered,
@@ -31,6 +37,8 @@ final class CaptureOverlayController {
             overlay.backgroundColor = .clear
             overlay.isOpaque = false
             overlay.hasShadow = false
+            overlay.ignoresMouseEvents = false
+            overlay.acceptsMouseMovedEvents = true
             overlay.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
             let view = CaptureOverlayView(frame: NSRect(origin: .zero, size: screen.frame.size))
@@ -39,8 +47,14 @@ final class CaptureOverlayController {
             view.windows = windows
             view.onSelection = { [weak self] selection in self?.finish(with: selection) }
             overlay.contentView = view
-            overlay.makeKeyAndOrderFront(nil)
+            overlay.orderFrontRegardless()
             return overlay
+        }
+
+        let mouseLocation = NSEvent.mouseLocation
+        if let activeOverlay = overlayWindows.first(where: { $0.frame.contains(mouseLocation) }) {
+            activeOverlay.makeKey()
+            activeOverlay.makeFirstResponder(activeOverlay.contentView)
         }
 
         NSCursor.crosshair.push()
