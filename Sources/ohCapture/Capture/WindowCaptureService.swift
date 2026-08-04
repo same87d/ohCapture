@@ -100,6 +100,52 @@ final class WindowCaptureService {
         )
     }
 
+    func captureRegion(_ region: CGRect, on screen: NSScreen) async throws -> CGImage {
+        guard region.width > 0, region.height > 0 else {
+            throw WindowCaptureError.invalidWindowSize
+        }
+
+        guard let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+            throw WindowCaptureError.invalidWindowSize
+        }
+
+        let content = try await SCShareableContent.excludingDesktopWindows(
+            true,
+            onScreenWindowsOnly: true
+        )
+        guard let display = content.displays.first(where: { $0.displayID == screenNumber.uint32Value }) else {
+            throw WindowCaptureError.invalidWindowSize
+        }
+
+        let ownBundleIdentifier = Bundle.main.bundleIdentifier
+        let excludedApplications = content.applications.filter {
+            $0.bundleIdentifier == ownBundleIdentifier
+        }
+        let filter = SCContentFilter(
+            display: display,
+            excludingApplications: excludedApplications,
+            exceptingWindows: []
+        )
+
+        let localRegion = CGRect(
+            x: region.minX - screen.frame.minX,
+            y: screen.frame.maxY - region.maxY,
+            width: region.width,
+            height: region.height
+        )
+        let scale = screen.backingScaleFactor
+        let configuration = SCStreamConfiguration()
+        configuration.sourceRect = localRegion
+        configuration.width = max(1, Int(localRegion.width * scale))
+        configuration.height = max(1, Int(localRegion.height * scale))
+        configuration.showsCursor = false
+
+        return try await SCScreenshotManager.captureImage(
+            contentFilter: filter,
+            configuration: configuration
+        )
+    }
+
     static func writePNG(_ image: CGImage, to url: URL) throws {
         guard let destination = CGImageDestinationCreateWithURL(
             url as CFURL,

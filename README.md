@@ -32,8 +32,9 @@ The first capture asks for Screen Recording permission in System Settings.
 1. Build and open `build/ohCapture.app`.
 2. Allow Screen Recording access when macOS asks, then relaunch ohCapture.
 3. Press `Option + Shift + 2`, or choose **Interactive Capture** from the menu-bar icon.
-4. Move the pointer over a window to highlight it, then click to capture its complete contents without raising it.
-5. Choose where to save the PNG.
+4. Move the pointer over a window and click to capture its complete contents without raising it.
+5. Or drag a rectangle to capture a free-form region on the current display.
+6. Choose where to save the PNG.
 
 Press `Escape` to cancel the capture overlay. The **Capture Window…** menu item remains available as a diagnostic window picker.
 

@@ -1,17 +1,22 @@
 import AppKit
 import Carbon
 
+enum CaptureSelection {
+    case window(CapturableWindow)
+    case region(CGRect, NSScreen)
+}
+
 final class CaptureOverlayController {
     private let windows: [CapturableWindow]
     private var overlayWindows: [NSWindow] = []
-    private var completion: ((CapturableWindow?) -> Void)?
+    private var completion: ((CaptureSelection?) -> Void)?
     private var escapeMonitor: Any?
 
     init(windows: [CapturableWindow]) {
         self.windows = windows
     }
 
-    func begin(completion: @escaping (CapturableWindow?) -> Void) {
+    func begin(completion: @escaping (CaptureSelection?) -> Void) {
         self.completion = completion
 
         overlayWindows = NSScreen.screens.map { screen in
@@ -30,6 +35,7 @@ final class CaptureOverlayController {
 
             let view = CaptureOverlayView(frame: NSRect(origin: .zero, size: screen.frame.size))
             view.screenFrame = screen.frame
+            view.screen = screen
             view.windows = windows
             view.onSelection = { [weak self] selection in self?.finish(with: selection) }
             overlay.contentView = view
@@ -47,7 +53,7 @@ final class CaptureOverlayController {
         }
     }
 
-    private func finish(with selection: CapturableWindow?) {
+    private func finish(with selection: CaptureSelection?) {
         guard let completion else { return }
         self.completion = nil
         overlayWindows.forEach { $0.orderOut(nil) }

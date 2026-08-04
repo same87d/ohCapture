@@ -2,13 +2,16 @@ import AppKit
 
 final class CaptureOverlayView: NSView {
     var screenFrame: CGRect = .zero
+    weak var screen: NSScreen?
     var windows: [CapturableWindow] = []
-    var onSelection: ((CapturableWindow) -> Void)?
+    var onSelection: ((CaptureSelection) -> Void)?
 
     private var hoveredWindow: CapturableWindow? {
         didSet { needsDisplay = true }
     }
     private var trackingAreaReference: NSTrackingArea?
+    private var dragStart: CGPoint?
+    private var selectionRect: CGRect?
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -26,6 +29,7 @@ final class CaptureOverlayView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        guard dragStart == nil else { return }
         let pointInScreen = CGPoint(
             x: screenFrame.minX + event.locationInWindow.x,
             y: screenFrame.minY + event.locationInWindow.y
@@ -34,12 +38,42 @@ final class CaptureOverlayView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        if let hoveredWindow { onSelection?(hoveredWindow) }
+        dragStart = pointClampedToBounds(event.locationInWindow)
+        selectionRect = nil
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let dragStart else { return }
+        let current = pointClampedToBounds(event.locationInWindow)
+        let rect = normalizedRect(from: dragStart, to: current)
+        guard rect.width >= 3 || rect.height >= 3 else { return }
+        hoveredWindow = nil
+        selectionRect = rect
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer {
+            dragStart = nil
+            selectionRect = nil
+        }
+
+        if let selectionRect, selectionRect.width >= 4, selectionRect.height >= 4, let screen {
+            let globalRegion = selectionRect.offsetBy(dx: screenFrame.minX, dy: screenFrame.minY)
+            onSelection?(.region(globalRegion, screen))
+        } else if let hoveredWindow {
+            onSelection?(.window(hoveredWindow))
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor.black.withAlphaComponent(0.32).setFill()
         bounds.fill()
+
+        if let selectionRect {
+            drawSelection(selectionRect)
+            return
+        }
 
         guard let hoveredWindow else { return }
         let localFrame = hoveredWindow.appKitFrame.offsetBy(dx: -screenFrame.minX, dy: -screenFrame.minY)
@@ -55,6 +89,37 @@ final class CaptureOverlayView: NSView {
         border.stroke()
 
         drawLabel(hoveredWindow.displayName, above: localFrame)
+    }
+
+    private func drawSelection(_ rect: CGRect) {
+        NSGraphicsContext.saveGraphicsState()
+        NSColor.clear.setFill()
+        rect.fill(using: .copy)
+        NSGraphicsContext.restoreGraphicsState()
+
+        let border = NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5))
+        border.lineWidth = 1
+        NSColor.white.setStroke()
+        border.stroke()
+
+        let dimensions = "\(Int(rect.width)) × \(Int(rect.height))"
+        drawLabel(dimensions, above: rect)
+    }
+
+    private func pointClampedToBounds(_ point: CGPoint) -> CGPoint {
+        CGPoint(
+            x: min(max(point.x, bounds.minX), bounds.maxX),
+            y: min(max(point.y, bounds.minY), bounds.maxY)
+        )
+    }
+
+    private func normalizedRect(from start: CGPoint, to end: CGPoint) -> CGRect {
+        CGRect(
+            x: min(start.x, end.x),
+            y: min(start.y, end.y),
+            width: abs(end.x - start.x),
+            height: abs(end.y - start.y)
+        )
     }
 
     private func drawLabel(_ text: String, above frame: CGRect) {

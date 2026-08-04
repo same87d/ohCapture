@@ -97,8 +97,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                     Task { @MainActor in
                         do {
-                            let image = try await self.captureService.capture(selection)
-                            try self.save(image, suggestedName: selection.safeFilename)
+                            switch selection {
+                            case .window(let window):
+                                let image = try await self.captureService.capture(window)
+                                try self.save(image, suggestedName: window.safeFilename)
+                            case .region(let region, let screen):
+                                let image = try await self.captureService.captureRegion(region, on: screen)
+                                try self.save(image, suggestedName: "ohCapture-region")
+                            }
                         } catch {
                             self.showError(error.localizedDescription)
                         }
