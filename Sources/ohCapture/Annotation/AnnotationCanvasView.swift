@@ -1,9 +1,12 @@
 import AppKit
+import CoreImage
 
 enum AnnotationTool {
     case none
     case arrow
     case rectangle
+    case text
+    case mosaic
 }
 
 private struct ShapeAnnotation {
@@ -12,15 +15,26 @@ private struct ShapeAnnotation {
     let end: CGPoint
 }
 
+private enum Annotation {
+    case shape(ShapeAnnotation)
+    case text(String, CGPoint)
+    case mosaic(CGRect)
+}
+
 final class AnnotationCanvasView: NSView {
     var activeTool: AnnotationTool = .none
+    var onTextRequested: ((CGPoint) -> Void)?
 
     private let sourceImage: CGImage
-    private var annotations: [ShapeAnnotation] = []
+    private let displayImage: NSImage
+    private let mosaicImage: NSImage
+    private var annotations: [Annotation] = []
     private var draft: ShapeAnnotation?
 
     init(image: CGImage, frame: CGRect) {
         sourceImage = image
+        displayImage = NSImage(cgImage: image, size: frame.size)
+        mosaicImage = AnnotationCanvasView.makeMosaicImage(from: image, size: frame.size)
         super.init(frame: frame)
     }
 
@@ -34,6 +48,11 @@ final class AnnotationCanvasView: NSView {
     override func mouseDown(with event: NSEvent) {
         guard activeTool != .none else { return }
         let point = clamped(event.locationInWindow)
+
+        if activeTool == .text {
+            onTextRequested?(point)
+            return
+        }
         draft = ShapeAnnotation(tool: activeTool, start: point, end: point)
         needsDisplay = true
     }
@@ -58,7 +77,20 @@ final class AnnotationCanvasView: NSView {
         self.draft = nil
 
         let distance = hypot(completed.end.x - completed.start.x, completed.end.y - completed.start.y)
-        if distance >= 3 { annotations.append(completed) }
+        if distance >= 3 {
+            if completed.tool == .mosaic {
+                annotations.append(.mosaic(normalizedRect(from: completed.start, to: completed.end)))
+            } else {
+                annotations.append(.shape(completed))
+            }
+        }
+        needsDisplay = true
+    }
+
+    func addText(_ text: String, at point: CGPoint) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        annotations.append(.text(trimmed, point))
         needsDisplay = true
     }
 
@@ -95,7 +127,7 @@ final class AnnotationCanvasView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        NSImage(cgImage: sourceImage, size: bounds.size).draw(
+        displayImage.draw(
             in: bounds,
             from: .zero,
             operation: .copy,
@@ -103,10 +135,27 @@ final class AnnotationCanvasView: NSView {
         )
 
         annotations.forEach(drawAnnotation)
-        if let draft { drawAnnotation(draft) }
+        if let draft {
+            if draft.tool == .mosaic {
+                drawMosaic(in: normalizedRect(from: draft.start, to: draft.end))
+            } else {
+                drawShape(draft)
+            }
+        }
     }
 
-    private func drawAnnotation(_ annotation: ShapeAnnotation) {
+    private func drawAnnotation(_ annotation: Annotation) {
+        switch annotation {
+        case .shape(let shape):
+            drawShape(shape)
+        case .text(let text, let point):
+            drawText(text, at: point)
+        case .mosaic(let rect):
+            drawMosaic(in: rect)
+        }
+    }
+
+    private func drawShape(_ annotation: ShapeAnnotation) {
         NSColor.systemRed.setStroke()
         NSColor.systemRed.setFill()
 
@@ -118,9 +167,28 @@ final class AnnotationCanvasView: NSView {
             let path = NSBezierPath(rect: rect)
             path.lineWidth = 3
             path.stroke()
-        case .none:
+        case .none, .text, .mosaic:
             break
         }
+    }
+
+    private func drawText(_ text: String, at point: CGPoint) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 18, weight: .semibold),
+            .foregroundColor: NSColor.systemRed,
+            .strokeColor: NSColor.white,
+            .strokeWidth: -2
+        ]
+        NSAttributedString(string: text, attributes: attributes).draw(at: point)
+    }
+
+    private func drawMosaic(in rect: CGRect) {
+        guard rect.width > 0, rect.height > 0 else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: rect).addClip()
+        NSGraphicsContext.current?.imageInterpolation = .none
+        mosaicImage.draw(in: bounds, from: .zero, operation: .copy, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     private func drawArrow(from start: CGPoint, to end: CGPoint) {
@@ -164,5 +232,19 @@ final class AnnotationCanvasView: NSView {
             x: min(max(point.x, bounds.minX), bounds.maxX),
             y: min(max(point.y, bounds.minY), bounds.maxY)
         )
+    }
+
+    private static func makeMosaicImage(from image: CGImage, size: CGSize) -> NSImage {
+        let input = CIImage(cgImage: image)
+        let pixelScale = max(10, CGFloat(image.width) / max(size.width, 1) * 10)
+        let output = input.applyingFilter(
+            "CIPixellate",
+            parameters: [kCIInputScaleKey: pixelScale]
+        )
+        let context = CIContext(options: [.cacheIntermediates: true])
+        guard let rendered = context.createCGImage(output, from: input.extent) else {
+            return NSImage(cgImage: image, size: size)
+        }
+        return NSImage(cgImage: rendered, size: size)
     }
 }

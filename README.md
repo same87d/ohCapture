@@ -37,7 +37,7 @@ The first capture asks for Screen Recording permission in System Settings.
 6. Use the floating toolbar to copy, save, or close the captured image.
 
 Press `Enter` to copy, `Command + S` to save, or `Escape` to close the preview.
-Choose **Arrow** or **Rect** to draw red annotations, and use **Undo** or `Command + Z` to remove the most recent shape. Copied and saved images include the annotations at the original screenshot resolution.
+Choose **Arrow** or **Rect** to draw red shapes. Choose **Text**, click the image, and enter a label. Choose **Mosaic** and drag over sensitive content to pixelate it. Use **Undo** or `Command + Z` to remove the most recent annotation. Copied and saved images include annotations at the original screenshot resolution.
 
 Press `Escape` to cancel the capture overlay. The **Capture Window…** menu item remains available as a diagnostic window picker.
 

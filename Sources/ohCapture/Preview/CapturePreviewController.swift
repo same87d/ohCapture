@@ -12,6 +12,9 @@ final class CapturePreviewController {
     private var canvasView: AnnotationCanvasView?
     private weak var arrowButton: NSButton?
     private weak var rectangleButton: NSButton?
+    private weak var textButton: NSButton?
+    private weak var mosaicButton: NSButton?
+    private var isPresentingTextDialog = false
     private var keyMonitor: Any?
     private var onCopy: (() -> Void)?
     private var onSave: ((CGImage) -> Void)?
@@ -37,6 +40,9 @@ final class CapturePreviewController {
             frame: NSRect(origin: .zero, size: captureFrame.size)
         )
         preview.contentView = canvas
+        canvas.onTextRequested = { [weak self] point in
+            self?.requestText(at: point)
+        }
         preview.orderFrontRegardless()
         previewWindow = preview
         canvasView = canvas
@@ -49,6 +55,7 @@ final class CapturePreviewController {
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
+            guard !self.isPresentingTextDialog else { return event }
             if event.keyCode == 53 {
                 self.cancel()
                 return nil
@@ -90,7 +97,7 @@ final class CapturePreviewController {
 
     private func makeToolbar() -> NSPanel {
         let buttonWidth: CGFloat = 70
-        let toolbarSize = CGSize(width: buttonWidth * 6 + 20, height: 48)
+        let toolbarSize = CGSize(width: buttonWidth * 8 + 20, height: 48)
         let panel = makePanel(
             frame: CGRect(origin: .zero, size: toolbarSize),
             level: NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
@@ -117,6 +124,14 @@ final class CapturePreviewController {
         rectangle.setButtonType(.toggle)
         rectangleButton = rectangle
         stack.addArrangedSubview(rectangle)
+        let text = makeButton(title: "Text", symbol: "textformat", action: #selector(selectText))
+        text.setButtonType(.toggle)
+        textButton = text
+        stack.addArrangedSubview(text)
+        let mosaic = makeButton(title: "Mosaic", symbol: "square.grid.3x3", action: #selector(selectMosaic))
+        mosaic.setButtonType(.toggle)
+        mosaicButton = mosaic
+        stack.addArrangedSubview(mosaic)
         stack.addArrangedSubview(makeButton(title: "Undo", symbol: "arrow.uturn.backward", action: #selector(undo)))
         stack.addArrangedSubview(makeButton(title: "Copy", symbol: "doc.on.doc", action: #selector(copyAndClose)))
         stack.addArrangedSubview(makeButton(title: "Save", symbol: "square.and.arrow.down", action: #selector(saveAndClose)))
@@ -175,6 +190,14 @@ final class CapturePreviewController {
         setActiveTool(canvasView?.activeTool == .rectangle ? .none : .rectangle)
     }
 
+    @objc private func selectText() {
+        setActiveTool(canvasView?.activeTool == .text ? .none : .text)
+    }
+
+    @objc private func selectMosaic() {
+        setActiveTool(canvasView?.activeTool == .mosaic ? .none : .mosaic)
+    }
+
     @objc private func undo() {
         canvasView?.undo()
     }
@@ -183,6 +206,25 @@ final class CapturePreviewController {
         canvasView?.activeTool = tool
         arrowButton?.state = tool == .arrow ? .on : .off
         rectangleButton?.state = tool == .rectangle ? .on : .off
+        textButton?.state = tool == .text ? .on : .off
+        mosaicButton?.state = tool == .mosaic ? .on : .off
+    }
+
+    private func requestText(at point: CGPoint) {
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        field.placeholderString = "Enter annotation text"
+
+        let alert = NSAlert()
+        alert.messageText = "Add text"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Add")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+
+        isPresentingTextDialog = true
+        defer { isPresentingTextDialog = false }
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        canvasView?.addText(field.stringValue, at: point)
     }
 
     @objc private func cancel() {
