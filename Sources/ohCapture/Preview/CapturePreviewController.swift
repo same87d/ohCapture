@@ -9,6 +9,9 @@ final class CapturePreviewController {
     private let captureFrame: CGRect
     private var previewWindow: NSPanel?
     private var toolbarWindow: NSPanel?
+    private var canvasView: AnnotationCanvasView?
+    private weak var arrowButton: NSButton?
+    private weak var rectangleButton: NSButton?
     private var keyMonitor: Any?
     private var onCopy: (() -> Void)?
     private var onSave: ((CGImage) -> Void)?
@@ -29,13 +32,14 @@ final class CapturePreviewController {
         self.onClose = onClose
 
         let preview = makePanel(frame: captureFrame, level: .screenSaver)
-        preview.ignoresMouseEvents = true
-        let imageView = NSImageView(frame: NSRect(origin: .zero, size: captureFrame.size))
-        imageView.image = NSImage(cgImage: image, size: captureFrame.size)
-        imageView.imageScaling = .scaleAxesIndependently
-        preview.contentView = imageView
+        let canvas = AnnotationCanvasView(
+            image: image,
+            frame: NSRect(origin: .zero, size: captureFrame.size)
+        )
+        preview.contentView = canvas
         preview.orderFrontRegardless()
         previewWindow = preview
+        canvasView = canvas
 
         let toolbar = makeToolbar()
         toolbar.setFrameOrigin(toolbarOrigin(for: toolbar.frame.size))
@@ -55,6 +59,10 @@ final class CapturePreviewController {
             }
             if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "s" {
                 self.saveAndClose()
+                return nil
+            }
+            if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "z" {
+                self.undo()
                 return nil
             }
             return event
@@ -81,8 +89,8 @@ final class CapturePreviewController {
     }
 
     private func makeToolbar() -> NSPanel {
-        let buttonWidth: CGFloat = 78
-        let toolbarSize = CGSize(width: buttonWidth * 3 + 20, height: 48)
+        let buttonWidth: CGFloat = 70
+        let toolbarSize = CGSize(width: buttonWidth * 6 + 20, height: 48)
         let panel = makePanel(
             frame: CGRect(origin: .zero, size: toolbarSize),
             level: NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
@@ -101,6 +109,15 @@ final class CapturePreviewController {
         stack.alignment = .centerY
         stack.distribution = .fillEqually
         stack.spacing = 4
+        let arrow = makeButton(title: "Arrow", symbol: "arrow.up.right", action: #selector(selectArrow))
+        arrow.setButtonType(.toggle)
+        arrowButton = arrow
+        stack.addArrangedSubview(arrow)
+        let rectangle = makeButton(title: "Rect", symbol: "rectangle", action: #selector(selectRectangle))
+        rectangle.setButtonType(.toggle)
+        rectangleButton = rectangle
+        stack.addArrangedSubview(rectangle)
+        stack.addArrangedSubview(makeButton(title: "Undo", symbol: "arrow.uturn.backward", action: #selector(undo)))
         stack.addArrangedSubview(makeButton(title: "Copy", symbol: "doc.on.doc", action: #selector(copyAndClose)))
         stack.addArrangedSubview(makeButton(title: "Save", symbol: "square.and.arrow.down", action: #selector(saveAndClose)))
         stack.addArrangedSubview(makeButton(title: "Close", symbol: "xmark", action: #selector(cancel)))
@@ -132,9 +149,10 @@ final class CapturePreviewController {
     }
 
     @objc private func copyAndClose() {
+        guard let renderedImage = canvasView?.renderedImage() else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        let bitmap = NSBitmapImageRep(cgImage: image)
+        let bitmap = NSBitmapImageRep(cgImage: renderedImage)
         guard let png = bitmap.representation(using: .png, properties: [:]) else { return }
         pasteboard.setData(png, forType: .png)
         let callback = onCopy
@@ -143,9 +161,28 @@ final class CapturePreviewController {
     }
 
     @objc private func saveAndClose() {
+        guard let renderedImage = canvasView?.renderedImage() else { return }
         let callback = onSave
         finish()
-        callback?(image)
+        callback?(renderedImage)
+    }
+
+    @objc private func selectArrow() {
+        setActiveTool(canvasView?.activeTool == .arrow ? .none : .arrow)
+    }
+
+    @objc private func selectRectangle() {
+        setActiveTool(canvasView?.activeTool == .rectangle ? .none : .rectangle)
+    }
+
+    @objc private func undo() {
+        canvasView?.undo()
+    }
+
+    private func setActiveTool(_ tool: AnnotationTool) {
+        canvasView?.activeTool = tool
+        arrowButton?.state = tool == .arrow ? .on : .off
+        rectangleButton?.state = tool == .rectangle ? .on : .off
     }
 
     @objc private func cancel() {
@@ -159,6 +196,7 @@ final class CapturePreviewController {
         toolbarWindow?.orderOut(nil)
         previewWindow = nil
         toolbarWindow = nil
+        canvasView = nil
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = nil
         onCopy = nil
