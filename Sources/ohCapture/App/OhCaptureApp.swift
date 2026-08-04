@@ -10,4 +10,3 @@ enum OhCaptureApp {
         application.run()
     }
 }
-
